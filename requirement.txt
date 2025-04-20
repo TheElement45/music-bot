@@ -1,0 +1,8 @@
+# Core discord.py library with voice support (includes PyNaCl)
+discord.py[voice]>=2.0.0
+
+# For loading environment variables from .env file
+python-dotenv
+
+# For downloading/extracting audio stream info from YouTube etc.
+yt-dlp

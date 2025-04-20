@@ -1,0 +1,18 @@
+# Environment variables
+.env
+
+# Logs
+discord.log
+yt_dlp.log
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# VS Code specific
+.vscode/
+
+# Optional: Add if you use specific virtual environment folders
+# venv/
+# .venv/
+# env/
