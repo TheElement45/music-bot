@@ -33,8 +33,8 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <your-repository-url>
-    cd <repository-directory>
+    git clone https://github.com/TheElement45/music-bot
+    cd https://github.com/TheElement45/music-bot
     ```
 
 2.  **Create a Virtual Environment (Recommended):**
