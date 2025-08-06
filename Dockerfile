@@ -3,9 +3,9 @@ FROM python:3.13-slim
 
 # --- Environment Variables ---
 # Prevents Python from writing .pyc files to disc
-ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONDONTWRITEBYTECODE=1
 # Ensures Python output is sent straight to the terminal without being buffered
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONUNBUFFERED=1
 
 # --- System Dependencies ---
 # Update the package manager and install FFmpeg, which is required for audio playback.
