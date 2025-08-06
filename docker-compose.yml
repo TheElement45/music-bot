@@ -1,0 +1,18 @@
+# Define the services (containers) that make up your app.
+services:
+  music-bot:
+    # Build the Docker image from the Dockerfile in the current directory ('.')
+    build: .
+    # Name the container for easier identification.
+    container_name: discord-music-bot
+    # Restart the bot automatically if it crashes, but not if you manually stop it.
+    restart: unless-stopped
+    # Load environment variables from the .env file.
+    # This securely passes your BOT_TOKEN to the container without hardcoding it.
+    env_file:
+      - .env
+    # Optional: Mount a volume for logs. This saves the discord.log file
+    # to a 'logs' directory on your host machine, so it persists even if
+    # the container is removed.
+    volumes:
+      - ./logs:/app/logs

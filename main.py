@@ -15,7 +15,8 @@ COMMAND_PREFIX = "-"
 # Keep logging setup as before
 discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.INFO)
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+os.makedirs('logs', exist_ok=True)
+handler = logging.FileHandler(filename='logs/discord.log', encoding='utf-8', mode='w')
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 discord_logger.addHandler(handler)
 
