@@ -44,7 +44,10 @@ class MusicBot(commands.Bot):
                 self.logger.error(f"Error loading extension {extension}", exc_info=e)
 
     async def on_ready(self):
-        print(f'Logged in as {self.user.name} (ID: {self.user.id})')
+        if self.user is not None:
+            print(f'Logged in as {self.user.name} (ID: {self.user.id})')
+        else:
+            print('Logged in, but self.user is None.')
         print('------')
         await self.change_presence(activity=discord.Game(name=f"music | {COMMAND_PREFIX}help"))
 
