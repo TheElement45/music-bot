@@ -6,3 +6,9 @@ python-dotenv
 
 # For downloading/extracting audio stream info from YouTube etc.
 yt-dlp
+
+# For async HTTP requests (lyrics API, etc.)
+aiohttp>=3.8.0
+
+# For better caching (optional, can use built-in dict instead)
+cachetools>=5.0.0
