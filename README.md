@@ -4,8 +4,13 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
 
 ## Features
 
+### Core Features
 *   Play music from YouTube URLs (videos & playlists) and search queries.
-*   Song queueing system.
+*   Intelligent song queueing system with queue size limits.
+*   **Advanced Caching System** - Reduces API calls and improves performance.
+*   **Playback History Tracking** - Keep track of recently played songs.
+
+### Interactive Controls
 *   Interactive "Now Playing" message with buttons for:
     *   Pause / Resume
     *   Skip Track
@@ -14,11 +19,27 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
     *   View Queue
     *   Clear Queue
     *   Leave Voice Channel
+
+### Music Commands
 *   Standard text commands for playback control (`-play`, `-skip`, `-pause`, `-resume`, `-stop`).
-*   Queue management commands (`-queue`, `-remove`, `-clear`, `-shuffle`, `-loop`).
-*   Bot automatically disconnects if left alone in a voice channel.
-*   Basic error handling and logging (`discord.log`).
-*   Configuration via `.env` file.
+*   Queue management (`-queue`, `-remove`, `-clear`, `-shuffle`, `-loop`, `-move`).
+*   **Volume Control** - Adjust playback volume (0-100%).
+*   **History & Previous** - Navigate through playback history
+*   **Replay/Restart** - Restart the current song
+*   **Lyrics Display** - Fetch and display song lyrics
+
+### Advanced Features
+*   **Enhanced Queue Display** - Paginated queue with progress bars and ETAs
+*   **Statistics Dashboard** - View bot uptime, cache performance, and more
+*   **Configurable Limits** - Max queue size, max song duration
+*   **Auto-disconnect** - Bot leaves when alone in voice channel
+*   **Log Rotation** - Organized logging with automatic rotation
+
+### Configuration & Performance
+*   Centralized configuration via `.env` file
+*   Intelligent caching for metadata and stream URLs
+*   Graceful shutdown handling
+*   Comprehensive error handling and logging
 
 ## Prerequisites
 
@@ -63,11 +84,20 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
     *   Copy the **Bot Token** (keep it secret!).
 
 5.  **Configure Environment Variables:**
-    *   Create a file named `.env` in the root directory of the project.
-    *   Add your bot token to this file:
+    *   Copy the example environment file:
+        ```bash
+        cp .env.example .env
+        ```
+    *   Edit `.env` and add your bot token:
         ```dotenv
         DISCORD_BOT_TOKEN=YOUR_SECRET_BOT_TOKEN_HERE
+        COMMAND_PREFIX=-
+        MAX_QUEUE_SIZE=100
+        MAX_SONG_DURATION=600
+        DEFAULT_VOLUME=75
+        ENABLE_LYRICS=True
         ```
+    *   See `.env.example` for all available configuration options.
 
 6.  **Invite the Bot:**
     *   Go back to the "General Information" tab in the Developer Portal to find your bot's `APPLICATION ID`.
@@ -94,44 +124,102 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
 
 ## Configuration
 
-*   **`.env` file:** Stores the bot token.
-    *   `DISCORD_BOT_TOKEN`: Your unique Discord bot token.
-*   **`main.py`:**
-    *   `COMMAND_PREFIX`: Change the default command prefix (`-`) here if desired.
+Configuration is managed through the `.env` file. Copy `.env.example` to `.env` and customize:
+
+### Required Settings
+*   `DISCORD_BOT_TOKEN`: Your unique Discord bot token
+
+### Bot Settings
+*   `COMMAND_PREFIX`: Command prefix (default: `-`)
+*   `MAX_QUEUE_SIZE`: Maximum songs in queue per guild (0 = unlimited, default: 100)
+*   `MAX_SONG_DURATION`: Maximum song length in seconds (0 = unlimited, default: 600)
+*   `DEFAULT_VOLUME`: Default playback volume 0-100 (default: 75)
+
+### Feature Flags
+*   `ENABLE_LYRICS`: Enable lyrics fetching (default: True)
+*   `ENABLE_VOTE_SKIP`: Enable vote-based skip system (default: True)
+
+### Cache Settings
+*   `METADATA_CACHE_TTL`: How long to cache song metadata in seconds (default: 3600)
+*   `STREAM_URL_CACHE_TTL`: How long to cache stream URLs in seconds (default: 300)
+*   `MAX_CACHE_SIZE`: Maximum cached items (default: 500)
+
+### Logging
+*   `LOG_LEVEL`: Logging level (default: INFO)
+*   `LOG_ROTATION`: When to rotate logs (default: midnight)
+*   `LOG_BACKUP_COUNT`: Number of log backups to keep (default: 7)
+
+See `config.py` for all available configuration options.
 
 ## Commands
 
 *(Default prefix is `-`)*
 
-**Playback:**
+### Playback Control
 
 *   `-join`: Makes the bot join your current voice channel.
-*   `-leave` / `-dc`: Makes the bot leave the voice channel.
+*   `-leave` / `-disconnect` / `-dc`: Makes the bot leave the voice channel.
 *   `-play <url_or_search_query>` / `-p <url_or_search_query>`: Plays a song/playlist or searches YouTube and adds the result(s) to the queue. Starts playback if nothing is playing.
 *   `-pause`: Pauses the current song.
-*   `-resume`: Resumes the paused song.
-*   `-stop`: Stops playback completely, clears the queue, and makes the bot leave the voice channel.
+*   `-resume` / `-unpause`: Resumes the paused song.
+*   `-stop`: Stops playback completely and clears the queue.
 *   `-skip` / `-s`: Skips the current song.
 
-**Queue Management:**
+### Volume & Effects
 
-*   `-queue` / `-q`: Shows the current song queue.
+*   `-volume [0-100]` / `-vol [0-100]`: View or set playback volume.
+*   `-replay` / `-restart`: Restart the current song from the beginning.
+
+### Queue Management
+
+*   `-queue` / `-q`: Shows the current song queue with pagination and progress bars.
 *   `-shuffle`: Shuffles the songs currently in the queue.
 *   `-remove <index>` / `-rm <index>`: Removes the song at the specified queue index (starting from 1).
+*   `-move <from> <to>`: Move a song from one position to another in the queue.
 *   `-clear`: Clears all songs from the queue.
 *   `-loop`: Toggles loop modes (Off -> Song -> Queue -> Off).
 
-**Information:**
+### History & Navigation
 
-*   `-nowplaying` / `-np`: Shows details about the currently playing song (static embed). *Note: The interactive message sent when a song starts is generally preferred.*
+*   `-previous` / `-prev` / `-back`: Play the previously played song.
+*   `-history`: Show recently played songs (last 10).
+
+### Information & Extras
+
+*   `-nowplaying` / `-np`: Shows details about the currently playing song (static embed).
+*   `-lyrics [query]`: Display lyrics for current song or search query.
+*   `-stats` / `-botinfo` / `-info`: Show bot statistics (uptime, cache performance, etc.).
+*   `-seek <timestamp>`: Jump to a specific time (e.g., 1:30, 90). *Note: Currently displays a placeholder message; full FFmpeg seek implementation is planned for a future update.*
+
+**Note:** Some commands require `Manage Messages` permission.
 
 ## Dependencies
 
 *   [discord.py](https://github.com/Rapptz/discord.py) - Python wrapper for the Discord API.
 *   [yt-dlp](https://github.com/yt-dlp/yt-dlp) - Feature-rich fork of youtube-dl used for extracting stream URLs.
 *   [python-dotenv](https://github.com/theskumar/python-dotenv) - For loading environment variables.
+*   [aiohttp](https://github.com/aio-libs/aiohttp) - Async HTTP client for lyrics API.
+*   [cachetools](https://github.com/tkem/cachetools) - Caching utilities.
 *   [PyNaCl](https://github.com/pyca/pynacl) - Required for voice support in discord.py.
 *   [FFmpeg](https://ffmpeg.org/) - External tool for audio encoding/decoding.
+
+## Project Structure
+
+```
+music-bot/
+├── main.py              # Bot entry point
+├── config.py            # Centralized configuration
+├── cogs/
+│   └── music_cog.py    # Music commands and playback logic
+├── utils/
+│   ├── __init__.py     # Utils package
+│   ├── helpers.py      # Helper functions (formatting, parsing, etc.)
+│   ├── cache.py        # Caching system
+│   └── lyrics.py       # Lyrics fetching
+├── requirements.txt     # Python dependencies
+├── .env.example        # Example environment variables
+└── README.md           # This file
+```
 
 ## License
 
