@@ -7,8 +7,8 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
 ### Core Features
 *   Play music from YouTube URLs (videos & playlists) and search queries.
 *   Intelligent song queueing system with queue size limits.
-*   **Advanced Caching System** - Reduces API calls and improves performance
-*   **Playback History Tracking** - Keep track of recently played songs
+*   **Advanced Caching System** - Reduces API calls and improves performance.
+*   **Playback History Tracking** - Keep track of recently played songs.
 
 ### Interactive Controls
 *   Interactive "Now Playing" message with buttons for:
@@ -21,9 +21,9 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
     *   Leave Voice Channel
 
 ### Music Commands
-*   Standard text commands for playback control (`-play`, `-skip`, `-pause`, `-resume`, `-stop`)
-*   Queue management (`-queue`, `-remove`, `-clear`, `-shuffle`, `-loop`, `-move`)
-*   **Volume Control** - Adjust playback volume (0-100%)
+*   Standard text commands for playback control (`-play`, `-skip`, `-pause`, `-resume`, `-stop`).
+*   Queue management (`-queue`, `-remove`, `-clear`, `-shuffle`, `-loop`, `-move`).
+*   **Volume Control** - Adjust playback volume (0-100%).
 *   **History & Previous** - Navigate through playback history
 *   **Replay/Restart** - Restart the current song
 *   **Lyrics Display** - Fetch and display song lyrics
@@ -189,7 +189,7 @@ See `config.py` for all available configuration options.
 *   `-nowplaying` / `-np`: Shows details about the currently playing song (static embed).
 *   `-lyrics [query]`: Display lyrics for current song or search query.
 *   `-stats` / `-botinfo` / `-info`: Show bot statistics (uptime, cache performance, etc.).
-*   `-seek <timestamp>`: Jump to a specific time (e.g., 1:30, 90) - simplified version.
+*   `-seek <timestamp>`: Jump to a specific time (e.g., 1:30, 90). *Note: Currently displays a placeholder message; full FFmpeg seek implementation is planned for a future update.*
 
 **Note:** Some commands require `Manage Messages` permission.
 
