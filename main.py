@@ -3,22 +3,33 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
+import logging.handlers
 import os
-from dotenv import load_dotenv
+import signal
+import sys
 
-# --- Load Environment Variables ---
-load_dotenv()
-BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-COMMAND_PREFIX = "-"
+# Import centralized config
+import config
 
 # --- Logging Setup ---
-# Keep logging setup as before
 discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.INFO)
+discord_logger.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
 os.makedirs('logs', exist_ok=True)
-handler = logging.FileHandler(filename='logs/discord.log', encoding='utf-8', mode='w')
+
+# Add rotating file handler
+handler = logging.handlers.TimedRotatingFileHandler(
+    filename=config.LOG_FILE,
+    encoding='utf-8',
+    when=config.LOG_ROTATION,
+    backupCount=config.LOG_BACKUP_COUNT
+)
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 discord_logger.addHandler(handler)
+
+# Also add console handler for development
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+discord_logger.addHandler(console_handler)
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -27,8 +38,9 @@ intents.voice_states = True
 
 class MusicBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix=COMMAND_PREFIX, intents=intents)
+        super().__init__(command_prefix=config.COMMAND_PREFIX, intents=intents)
         self.logger = discord_logger # Make logger accessible
+        self._shutdown_flag = False
 
     async def setup_hook(self):
         """Loads extensions (cogs) before the bot connects."""
@@ -49,14 +61,32 @@ class MusicBot(commands.Bot):
         else:
             print('Logged in, but self.user is None.')
         print('------')
-        await self.change_presence(activity=discord.Game(name=f"music | {COMMAND_PREFIX}help"))
+        await self.change_presence(activity=discord.Game(name=f"music | {config.COMMAND_PREFIX}help"))
+    
+    async def shutdown(self):
+        """Gracefully shutdown the bot"""
+        if self._shutdown_flag:
+            return
+        self._shutdown_flag = True
+        
+        self.logger.info("Shutting down bot...")
+        
+        # Disconnect from all voice channels
+        for vc in self.voice_clients:
+            try:
+                await vc.disconnect(force=True)
+            except:
+                pass
+        
+        # Close the bot
+        await self.close()
 
     async def on_command_error(self, ctx, error):
         """Global command error handler"""
         if isinstance(error, commands.CommandNotFound):
             pass # Ignore command not found
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"Missing argument(s). Usage: `{COMMAND_PREFIX}{ctx.command.name} {ctx.command.signature}`", delete_after=15)
+            await ctx.send(f"Missing argument(s). Usage: `{config.COMMAND_PREFIX}{ctx.command.name} {ctx.command.signature}`", delete_after=15)
         elif isinstance(error, commands.NotOwner):
             await ctx.send("Owner command only.", delete_after=15)
         elif isinstance(error, commands.MissingPermissions):
@@ -76,21 +106,39 @@ class MusicBot(commands.Bot):
 
 bot = MusicBot()
 
+# --- Signal handlers for graceful shutdown ---
+def handle_shutdown(signum, frame):
+    """Handle shutdown signals"""
+    print("\nReceived shutdown signal, closing bot...")
+    asyncio.create_task(bot.shutdown())
+
 # --- Run the Bot ---
 if __name__ == "__main__":
-    if not BOT_TOKEN:
+    if not config.BOT_TOKEN:
         print("ERROR: DISCORD_BOT_TOKEN not found in .env file or environment variables.")
-    else:
-        try:
-            # Use asyncio.run() to start the bot runner
-            # Remove log_handler from start() as it's not a valid argument
-            asyncio.run(bot.start(BOT_TOKEN)) # Corrected line
-        except discord.LoginFailure:
-            print("LOGIN FAILED: Check if the DISCORD_BOT_TOKEN is correct.")
-            bot.logger.critical("LOGIN FAILED: Invalid Token.")
-        except discord.PrivilegedIntentsRequired:
-             print("PRIVILEGED INTENTS ERROR: Ensure 'MESSAGE CONTENT INTENT' is enabled.")
-             bot.logger.critical("PRIVILEGED INTENTS ERROR: Message Content Intent missing.")
-        except Exception as e:
-            print(f"FATAL ERROR starting bot: {e}")
-            bot.logger.critical(f"FATAL ERROR starting bot: {e}", exc_info=True)
+        sys.exit(1)
+    
+    # Register signal handlers
+    try:
+        signal.signal(signal.SIGINT, handle_shutdown)
+        signal.signal(signal.SIGTERM, handle_shutdown)
+    except Exception as e:
+        print(f"Warning: Could not register signal handlers: {e}")
+    
+    try:
+        # Use asyncio.run() to start the bot
+        asyncio.run(bot.start(config.BOT_TOKEN))
+    except discord.LoginFailure:
+        print("LOGIN FAILED: Check if the DISCORD_BOT_TOKEN is correct.")
+        bot.logger.critical("LOGIN FAILED: Invalid Token.")
+        sys.exit(1)
+    except discord.PrivilegedIntentsRequired:
+        print("PRIVILEGED INTENTS ERROR: Ensure 'MESSAGE CONTENT INTENT' is enabled.")
+        bot.logger.critical("PRIVILEGED INTENTS ERROR: Message Content Intent missing.")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nBot stopped by user.")
+    except Exception as e:
+        print(f"FATAL ERROR starting bot: {e}")
+        bot.logger.critical(f"FATAL ERROR starting bot: {e}", exc_info=True)
+        sys.exit(1)

@@ -7,29 +7,20 @@ import logging
 import datetime
 import re
 import random
+import time
+
+# Import config and utilities
+import config
+from utils.helpers import format_duration, parse_time, create_progress_bar, format_time_until, calculate_total_queue_duration
+from utils.cache import GuildCache
+from utils.lyrics import LyricsProvider
 
 # --- FFmpeg and yt-dlp Options ---
-# (Keep YDL_BASE_OPTIONS and FFMPEG_OPTIONS as before)
-YDL_BASE_OPTIONS = {
-    'format': 'bestaudio/best', 'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'restrictfilenames': True, 'noplaylist': False, 'nocheckcertificate': True,
-    'ignoreerrors': False, 'logtostderr': False, 'quiet': True, 'no_warnings': True,
-    'default_search': 'auto', 'source_address': '0.0.0.0', 'skip_download': True,
-}
-FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -filter:a "volume=0.75"'
-}
+# Use config options
 PLAYLIST_URL_PATTERN = re.compile(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/(playlist)\?(list=.*)$')
 
 # --- Helper Functions ---
-def format_duration(seconds):
-    # (Keep format_duration function as before)
-    if seconds is None: return "N/A";
-    try: seconds = int(seconds)
-    except: return "N/A"
-    m, s = divmod(seconds, 60); h, m = divmod(m, 60)
-    return f"{h:d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+# No longer needed here - using imports from utils.helpers
 
 # --- Music Control View (Updated with Shuffle Button) ---
 class MusicControlView(discord.ui.View):
@@ -174,6 +165,16 @@ class MusicCog(commands.Cog):
         self.current_song = {}
         self.loop_mode = {} # Modes: 'off', 'song', 'queue'
         self.now_playing_messages = {}
+        
+        # NEW: Add caching, lyrics, and additional features
+        self.cache = GuildCache(max_size=config.MAX_CACHE_SIZE)
+        self.lyrics_provider = LyricsProvider(config.LYRICS_API_URL)
+        self.volume_settings = {}  # guild_id: volume (0-100)
+        self.playback_history = {}  # guild_id: list of songs (max 50)
+        self.audio_effects = {}  # guild_id: {speed: float, bass_boost: str}
+        self.start_time = time.time()  # For uptime tracking
+        self.song_start_times = {}  # guild_id: timestamp when song started
+        self.vote_skip_voters = {}  # guild_id: set of user_ids
 
     # --- Helper Methods ---
     # (delete_now_playing_message, send_now_playing, resolve_stream_url, search_and_get_info remain the same)
@@ -211,24 +212,47 @@ class MusicCog(commands.Cog):
             view_instance.stop() # Stop the view if sending failed
 
     async def resolve_stream_url(self, video_id_or_url: str):
-        # (Same as before)
+        # Check cache first
+        cache_key = f"stream:{video_id_or_url}"
+        cached_url = await self.cache.stream_url_cache.get(cache_key)
+        if cached_url:
+            self.logger.info(f"Cache hit for stream: {video_id_or_url}")
+            return cached_url
+        
+        # Original resolution logic
         self.logger.info(f"Resolving stream URL for: {video_id_or_url}")
-        ydl_opts = YDL_BASE_OPTIONS.copy(); ydl_opts['extract_flat'] = False; loop = asyncio.get_event_loop()
+        ydl_opts = config.YDL_BASE_OPTIONS.copy(); ydl_opts['extract_flat'] = False; loop = asyncio.get_event_loop()
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: data = await loop.run_in_executor(None, lambda: ydl.extract_info(video_id_or_url, download=False))
             if not data: return None
             stream_url = data.get('url');
-            if stream_url and data.get('acodec') != 'none': return stream_url
+            if stream_url and data.get('acodec') != 'none':
+                # Cache the result
+                await self.cache.stream_url_cache.set(cache_key, stream_url, config.STREAM_URL_CACHE_TTL)
+                return stream_url
             for fmt in data.get('formats', []):
-                if fmt.get('acodec') == 'opus' and fmt.get('url'): return fmt['url']
+                if fmt.get('acodec') == 'opus' and fmt.get('url'):
+                    stream_url = fmt['url']
+                    await self.cache.stream_url_cache.set(cache_key, stream_url, config.STREAM_URL_CACHE_TTL)
+                    return stream_url
             for fmt in data.get('formats', []):
-                 if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none' and fmt.get('url'): return fmt['url']
+                if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none' and fmt.get('url'):
+                    stream_url = fmt['url']
+                    await self.cache.stream_url_cache.set(cache_key, stream_url, config.STREAM_URL_CACHE_TTL)
+                    return stream_url
             self.logger.warning(f"No audio stream URL found for {video_id_or_url} after resolution."); return None
         except Exception as e: self.logger.error(f"Error resolving stream URL {video_id_or_url}: {e}", exc_info=True); return None
 
     async def search_and_get_info(self, query: str):
-        # (Same as before)
-        is_playlist = bool(PLAYLIST_URL_PATTERN.match(query)); ydl_opts = YDL_BASE_OPTIONS.copy()
+        # Check cache first
+        cache_key = f"search:{query}"
+        cached_result = await self.cache.metadata_cache.get(cache_key)
+        if cached_result:
+            self.logger.info(f"Cache hit for search: {query}")
+            return cached_result
+        
+        # Original search logic
+        is_playlist = bool(PLAYLIST_URL_PATTERN.match(query)); ydl_opts = config.YDL_BASE_OPTIONS.copy()
         if is_playlist: self.logger.info(f"Playlist detected: {query}"); ydl_opts['extract_flat'] = True; ydl_opts['noplaylist'] = False
         else: self.logger.info(f"Single/Search: {query}"); ydl_opts['extract_flat'] = False; ydl_opts['noplaylist'] = True
         loop = asyncio.get_event_loop()
@@ -246,6 +270,11 @@ class MusicCog(commands.Cog):
                                    'resolved': resolved_url is not None and not entry.get('url', '').startswith(('http://www.youtube.com','https://www.youtube.com')),
                                    'duration': entry.get('duration'), 'thumbnail': entry.get('thumbnail'), 'uploader': entry.get('uploader'),
                                    'webpage_url': entry.get('webpage_url', f"https://www.youtube.com/watch?v={video_id}")})
+            
+            # Cache the result
+            if songs_list:
+                await self.cache.metadata_cache.set(cache_key, songs_list, config.METADATA_CACHE_TTL)
+            
             return songs_list
         except yt_dlp.utils.DownloadError as e: self.logger.error(f"yt-dlp DownloadError '{query}': {e}", exc_info=True); return {'error': f"yt-dlp error: {e}"} # Simplified error
         except Exception as e: self.logger.error(f"search_and_get_info error '{query}': {e}", exc_info=True); return {'error': f"Unexpected error: {e}"}
@@ -318,7 +347,30 @@ class MusicCog(commands.Cog):
         title = song_to_play['title']; stream_url = song_to_play['url']
         try:
             if not isinstance(stream_url, str) or not stream_url.startswith('http'): raise ValueError(f"Invalid stream URL: {stream_url}")
-            source = discord.FFmpegOpusAudio(stream_url, **FFMPEG_OPTIONS)
+            
+            # Get volume and effects for this guild
+            volume = self.volume_settings.get(guild_id, config.DEFAULT_VOLUME)
+            effects = self.audio_effects.get(guild_id, {'speed': 1.0, 'bass_boost': 'off'})
+            
+            # Generate FFmpeg options with dynamic filters
+            ffmpeg_opts = config.get_ffmpeg_options(
+                volume=volume,
+                speed=effects['speed'],
+                bass_boost=effects['bass_boost']
+            )
+            
+            source = discord.FFmpegOpusAudio(stream_url, **ffmpeg_opts)
+            
+            # Track start time for progress tracking
+            self.song_start_times[guild_id] = time.time()
+            
+            # Add to playback history
+            if guild_id not in self.playback_history:
+                self.playback_history[guild_id] = []
+            self.playback_history[guild_id].append(song_to_play.copy())
+            if len(self.playback_history[guild_id]) > config.MAX_HISTORY_SIZE:
+                self.playback_history[guild_id].pop(0)
+            
             # Create a NEW view instance for EACH song
             view = MusicControlView(self)
             vc.play(source, after=lambda e: self.after_play_handler(e, ctx))
@@ -609,6 +661,209 @@ class MusicCog(commands.Cog):
         guild_id = ctx.guild.id
         if guild_id in self.queues and self.queues[guild_id]: count = len(self.queues[guild_id]); self.queues[guild_id] = []; await ctx.send(f"🗑️ Cleared {count} songs.")
         else: await ctx.send("Queue empty.", delete_after=10); await ctx.message.add_reaction('❓')
+    
+    # --- NEW COMMANDS ---
+    
+    @commands.command(name='volume', aliases=['vol'], help='Set or view playback volume (0-100).')
+    async def volume(self, ctx, volume: int = None):
+        """Set or display current volume"""
+        guild_id = ctx.guild.id
+        vc = ctx.voice_client
+        
+        if volume is None:
+            # Show current volume
+            current_vol = self.volume_settings.get(guild_id, config.DEFAULT_VOLUME)
+            await ctx.send(f"🔊 Current volume: **{current_vol}%**")
+            return
+        
+        # Validate range
+        if not 0 <= volume <= 100:
+            await ctx.send("Volume must be between 0 and 100.", delete_after=10)
+            return
+        
+        # Set volume
+        self.volume_settings[guild_id] = volume
+        
+        # If currently playing, restart with new volume
+        if vc and (vc.is_playing() or vc.is_paused()):
+            await ctx.send(f"🔊 Volume set to **{volume}%**. Will apply to next song.")
+        else:
+            await ctx.send(f"🔊 Volume set to **{volume}%**")
+        
+        await ctx.message.add_reaction('✅')
+    
+    @commands.command(name='replay', aliases=['restart'], help='Restart the current song from the beginning.')
+    async def replay(self, ctx):
+        """Restart current song"""
+        vc = ctx.voice_client
+        guild_id = ctx.guild.id
+        
+        if not vc or not (vc.is_playing() or vc.is_paused()):
+            await ctx.send("Nothing is playing.", delete_after=10)
+            return
+        
+        current_song_info = self.current_song.get(guild_id)
+        if not current_song_info:
+            await ctx.send("No song information available.", delete_after=10)
+            return
+        
+        # Add current song to front of queue
+        if guild_id not in self.queues:
+            self.queues[guild_id] = []
+        
+        song_copy = current_song_info.copy()
+        self.queues[guild_id].insert(0, song_copy)
+        
+        # Stop current playback (will trigger play_next)
+        vc.stop()
+        await ctx.send("🔄 Restarting song...")
+        await ctx.message.add_reaction('✅')
+    
+    @commands.command(name='previous', aliases=['prev', 'back'], help='Play the previously played song.')
+    async def previous(self, ctx):
+        """Play the previous song from history"""
+        guild_id = ctx.guild.id
+        history = self.playback_history.get(guild_id, [])
+        
+        if len(history) < 2:  # Need at least 2 songs (current + previous)
+            await ctx.send("No previous song in history.", delete_after=10)
+            return
+        
+        # Get previous song (second to last in history)
+        previous_song = history[-2].copy()
+        
+        # Add to front of queue
+        if guild_id not in self.queues:
+            self.queues[guild_id] = []
+        self.queues[guild_id].insert(0, previous_song)
+        
+        # Skip current song
+        vc = ctx.voice_client
+        if vc and (vc.is_playing() or vc.is_paused()):
+            vc.stop()
+        
+        await ctx.send(f"⏮️ Playing previous: **{previous_song['title']}**")
+        await ctx.message.add_reaction('✅')
+    
+    @commands.command(name='history', help='Show recently played songs.')
+    async def history(self, ctx):
+        """Display playback history"""
+        guild_id = ctx.guild.id
+        history = self.playback_history.get(guild_id, [])
+        
+        if not history:
+            await ctx.send("No playback history yet.", delete_after=10)
+            return
+        
+        embed = discord.Embed(title="📜 Playback History", color=config.COLOR_INFO)
+        
+        history_text = ""
+        for i, song in enumerate(reversed(history[-10:]), 1):  # Last 10 songs
+            history_text += f"{i}. **{song['title']}** (by {song['requester'].display_name})\n"
+        
+        embed.description = history_text
+        embed.set_footer(text=f"Showing last {min(len(history), 10)} songs")
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='lyrics', help='Show lyrics for current song or search query.')
+    async def lyrics(self, ctx, *, query: str = None):
+        """Fetch and display song lyrics"""
+        if not config.ENABLE_LYRICS:
+            await ctx.send("Lyrics feature is disabled.", delete_after=10)
+            return
+        
+        guild_id = ctx.guild.id
+        
+        # If no query, use current song
+        if query is None:
+            current_song_info = self.current_song.get(guild_id)
+            if not current_song_info:
+                await ctx.send("No song playing. Provide a search query.", delete_after=10)
+                return
+            query = current_song_info['title']
+        
+        # Check cache first
+        cache_key = f"lyrics:{query.lower()}"
+        cached_lyrics = await self.cache.lyrics_cache.get(cache_key)
+        
+        if cached_lyrics:
+            lyrics_text = cached_lyrics
+            self.logger.info(f"Cache hit for lyrics: {query}")
+        else:
+            # Fetch lyrics
+            async with ctx.typing():
+                artist, title = self.lyrics_provider.extract_artist_title_from_youtube(query)
+                lyrics_text = await self.lyrics_provider.fetch_lyrics(artist, title)
+            
+            if not lyrics_text:
+                await ctx.send(f"❌ Lyrics not found for: **{query}**")
+                return
+            
+            # Cache the lyrics
+            await self.cache.lyrics_cache.set(cache_key, lyrics_text, config.METADATA_CACHE_TTL)
+        
+        # Format and send lyrics in chunks
+        chunks = self.lyrics_provider.format_lyrics(lyrics_text, 2000)
+        
+        for i, chunk in enumerate(chunks[:3], 1):  # Limit to 3 embeds
+            embed = discord.Embed(
+                title=f"📝 Lyrics: {query}" if i == 1 else f"📝 Lyrics (continued {i}/{len(chunks)})",
+                description=chunk,
+                color=config.COLOR_INFO
+            )
+            await ctx.send(embed=embed)
+    
+    @commands.command(name='stats', aliases=['botinfo', 'info'], help='Show bot statistics.')
+    async def stats(self, ctx):
+        """Display bot statistics"""
+        # Calculate uptime
+        uptime_seconds = int(time.time() - self.start_time)
+        uptime_str = format_duration(uptime_seconds)
+        
+        # Count songs in all queues
+        total_queued = sum(len(q) for q in self.queues.values())
+        
+        # Get cache stats
+        cache_stats = self.cache.get_all_stats()
+        
+        embed = discord.Embed(title="📊 Bot Statistics", color=config.COLOR_INFO)
+        embed.add_field(name="Uptime", value=uptime_str, inline=True)
+        embed.add_field(name="Guilds", value=str(len(self.bot.guilds)), inline=True)
+        embed.add_field(name="Voice Connections", value=str(len(self.bot.voice_clients)), inline=True)
+        embed.add_field(name="Total Queued Songs", value=str(total_queued), inline=True)
+        
+        # Cache stats
+        meta_stats = cache_stats['metadata']
+        embed.add_field(
+            name="Cache Performance",
+            value=f"Hit Rate: {meta_stats['hit_rate']}\nCached Items: {meta_stats['size']}/{meta_stats['max_size']}",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='move', help='Move a song in the queue (e.g., -move 3 1).')
+    async def move(self, ctx, from_pos: int, to_pos: int):
+        """Move song from one position to another"""
+        guild_id = ctx.guild.id
+        queue = self.queues.get(guild_id, [])
+        
+        if not queue:
+            await ctx.send("Queue is empty.", delete_after=10)
+            return
+        
+        if not (1 <= from_pos <= len(queue)) or not (1 <= to_pos <= len(queue)):
+            await ctx.send(f"Invalid positions. Queue has {len(queue)} songs.", delete_after=10)
+            return
+        
+        # Move the song
+        song = queue.pop(from_pos - 1)
+        queue.insert(to_pos - 1, song)
+        
+        await ctx.send(f"✅ Moved **{song['title']}** from position {from_pos} to {to_pos}")
+        await ctx.message.add_reaction('✅')
+
 
 
 # --- Cog Setup Function ---
