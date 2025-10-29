@@ -204,6 +204,25 @@ class MusicCog(commands.Cog):
         self.start_time = time.time()  # For uptime tracking
         self.song_start_times = {}  # guild_id: timestamp when song started
         self.vote_skip_voters = {}  # guild_id: set of user_ids
+        
+        # Start cache cleanup task
+        self.cache_cleanup_task = self.bot.loop.create_task(self.cache_cleanup_loop())
+    
+    async def cache_cleanup_loop(self):
+        """Periodic task to cleanup expired cache items"""
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                await self.cache.cleanup_all()
+                self.logger.info("Cache cleanup completed")
+            except Exception as e:
+                self.logger.error(f"Error in cache cleanup: {e}", exc_info=True)
+    
+    def cog_unload(self):
+        """Cleanup when cog is unloaded"""
+        if hasattr(self, 'cache_cleanup_task'):
+            self.cache_cleanup_task.cancel()
 
     # --- Helper Methods ---
     # (delete_now_playing_message, send_now_playing, resolve_stream_url, search_and_get_info remain the same)
@@ -566,7 +585,7 @@ class MusicCog(commands.Cog):
             except asyncio.TimeoutError: await ctx.send(f"Timeout moving to {target_channel.mention}."); return
             except Exception as e: await ctx.send(f"Error moving: {e}"); self.logger.error(f"Move error G:{ctx.guild.id}: {e}", exc_info=True); return
 
-        # (Search and Queueing Logic - Same as before)
+        # (Search and Queueing Logic - With validation)
         guild_id = ctx.guild.id
         results = None
         async with ctx.typing(): results = await self.search_and_get_info(query)
@@ -574,21 +593,54 @@ class MusicCog(commands.Cog):
         if isinstance(results, dict) and 'error' in results: await ctx.send(f"❌ Error: {results['error']}"); return
         if not isinstance(results, list): await ctx.send(f"❌ Unexpected error processing results."); self.logger.error(f"search_and_get_info returned non-list/dict: {results}"); return
         if guild_id not in self.queues: self.queues[guild_id] = []
+        
+        # Validate queue size limit
+        current_queue_size = len(self.queues[guild_id])
+        if config.MAX_QUEUE_SIZE > 0 and current_queue_size >= config.MAX_QUEUE_SIZE:
+            await ctx.send(f"❌ Queue is full! Maximum size is {config.MAX_QUEUE_SIZE} songs.", delete_after=15)
+            return
+        
         is_playing_or_paused = vc.is_playing() or vc.is_paused()
-        start_playing = not is_playing_or_paused; added_count = 0
+        start_playing = not is_playing_or_paused; added_count = 0; skipped_count = 0
+        
         for song_info in results:
+            # Check queue size limit
+            if config.MAX_QUEUE_SIZE > 0 and len(self.queues[guild_id]) >= config.MAX_QUEUE_SIZE:
+                skipped_count = len(results) - added_count
+                break
+            
+            # Check song duration limit
+            duration = song_info.get('duration')
+            if config.MAX_SONG_DURATION > 0 and duration and duration > config.MAX_SONG_DURATION:
+                self.logger.info(f"Skipping song '{song_info.get('title')}' - exceeds max duration ({duration}s > {config.MAX_SONG_DURATION}s)")
+                skipped_count += 1
+                continue
+            
             song_info['requester'] = ctx.author
             self.queues[guild_id].append(song_info)
             added_count += 1
-        if added_count == 0: await ctx.send(f"❌ No valid songs found or added for '{query}'."); return # Should not happen if results is a list but good check
+        
+        if added_count == 0:
+            if skipped_count > 0:
+                await ctx.send(f"❌ All {skipped_count} songs exceeded the maximum duration of {format_duration(config.MAX_SONG_DURATION)}.")
+            else:
+                await ctx.send(f"❌ No valid songs found or added for '{query}'.")
+            return
+        
         first_title = results[0].get('title', 'Unknown Title') # Safer access
         queue_len = len(self.queues[guild_id])
+        
+        # Send feedback
         if added_count == 1:
             if start_playing: await ctx.message.add_reaction('🎶') # Indicate starting playback
             else: await ctx.send(f"✅ Added **{first_title}** to queue (#{queue_len}).")
         else:
-            await ctx.send(f"✅ Added **{added_count}** songs to queue (starting with **{first_title}**).")
+            message = f"✅ Added **{added_count}** songs to queue (starting with **{first_title}**)."
+            if skipped_count > 0:
+                message += f"\n⚠️ Skipped {skipped_count} songs (too long or queue full)."
+            await ctx.send(message)
             if start_playing: await ctx.message.add_reaction('🎶') # Indicate starting playback
+        
         if start_playing:
             self.play_next(ctx) # Start playback cycle
 

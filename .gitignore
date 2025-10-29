@@ -2,6 +2,7 @@
 .env
 
 # Logs
+logs/
 discord.log
 yt_dlp.log
 
