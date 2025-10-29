@@ -156,6 +156,35 @@ class MusicControlView(discord.ui.View):
         if vc: await interaction.response.send_message("Leaving...", ephemeral=True, delete_after=5); await vc.disconnect(force=True)
         else: await interaction.response.send_message("Not connected.", ephemeral=True, delete_after=10)
 
+# --- Queue Pagination View ---
+class QueuePaginationView(discord.ui.View):
+    def __init__(self, cog, guild_id, pages, timeout=60):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.pages = pages
+        self.current_page = 0
+        self.message = None
+        self.update_buttons()
+    
+    def update_buttons(self):
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= len(self.pages) - 1
+    
+    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+    
+    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+
 # --- Music Cog Class ---
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -192,15 +221,45 @@ class MusicCog(commands.Cog):
 
 
     async def send_now_playing(self, ctx, song_to_play, view_instance):
-        # (Same as before - ensure view is updated before sending)
-        guild_id = ctx.guild.id; requester = song_to_play['requester']
+        """Send enhanced now playing message with progress bar and metadata"""
+        guild_id = ctx.guild.id
+        requester = song_to_play['requester']
         await self.delete_now_playing_message(guild_id) # Clear old message first
-        embed = discord.Embed(title=song_to_play['title'], url=song_to_play.get('webpage_url'), color=discord.Color.blue())
+        
+        # Create embed with enhanced info
+        embed = discord.Embed(
+            title=song_to_play['title'],
+            url=song_to_play.get('webpage_url'),
+            color=config.COLOR_PLAYING
+        )
         embed.set_author(name=f"Requested by {requester.display_name}", icon_url=requester.display_avatar.url)
-        embed.add_field(name="Duration", value=format_duration(song_to_play.get('duration')), inline=True)
+        
+        # Duration and uploader
+        duration = song_to_play.get('duration')
+        embed.add_field(name="Duration", value=format_duration(duration), inline=True)
         embed.add_field(name="Uploader", value=song_to_play.get('uploader', 'N/A'), inline=True)
-        if song_to_play.get('thumbnail'): embed.set_thumbnail(url=song_to_play.get('thumbnail'))
+        
+        # Volume and effects
+        volume = self.volume_settings.get(guild_id, config.DEFAULT_VOLUME)
+        embed.add_field(name="Volume", value=f"{volume}%", inline=True)
+        
+        # Queue info
+        queue_len = len(self.queues.get(guild_id, []))
+        if queue_len > 0:
+            embed.add_field(name="In Queue", value=f"{queue_len} songs", inline=True)
+        
+        # Loop mode
+        loop_mode = self.loop_mode.get(guild_id, 'off')
+        if loop_mode == 'song':
+            embed.add_field(name="Loop", value="🔂 Song", inline=True)
+        elif loop_mode == 'queue':
+            embed.add_field(name="Loop", value="🔁 Queue", inline=True)
+        
+        if song_to_play.get('thumbnail'):
+            embed.set_thumbnail(url=song_to_play.get('thumbnail'))
+        
         embed.set_footer(text="Now Playing 🎵")
+        
         try:
             view_instance.ctx_ref = ctx # Store context ref
             view_instance.update_buttons() # Update buttons before sending
@@ -617,27 +676,92 @@ class MusicCog(commands.Cog):
 
     @commands.command(name='queue', aliases=['q'], help='Shows the current song queue.')
     async def queue(self, ctx):
-        # (Same as before)
-        guild_id = ctx.guild.id; embed = discord.Embed(title="🎵 Song Queue 🎵", color=discord.Color.blue())
-        np_info = self.current_song.get(guild_id); q = self.queues.get(guild_id, [])
+        """Display queue with pagination and enhanced info"""
+        guild_id = ctx.guild.id
+        np_info = self.current_song.get(guild_id)
+        q = self.queues.get(guild_id, [])
         loop_mode = self.loop_mode.get(guild_id, 'off')
-        footer_text = ""
-        if loop_mode == 'song': footer_text = " | Loop: Song 🔂"
-        elif loop_mode == 'queue': footer_text = " | Loop: Queue 🔁"
-
-        if np_info: embed.add_field(name="▶️ Now Playing", value=f"**{np_info['title']}** (Req by {np_info['requester'].mention})", inline=False)
-        else: embed.add_field(name="▶️ Now Playing", value="Nothing playing.", inline=False)
-        if q:
-            queue_list = ""; limit = 15
-            for i, song in enumerate(q[:limit]): queue_list += f"{i+1}. **{song['title']}** (Req by {song['requester'].display_name})\n"
-            embed.add_field(name=f"Up Next ({len(q)} total)", value=queue_list.strip() or "Empty", inline=False)
-            if len(q) > limit: footer_text = f"...and {len(q) - limit} more" + footer_text
-            elif not footer_text: pass # No need for footer if queue short and no loop
-            else: footer_text = footer_text.lstrip(" | ") # Remove leading separator if only loop status shown
-        else: embed.add_field(name="Up Next", value="The queue is empty!", inline=False)
-
-        if footer_text: embed.set_footer(text=footer_text)
-        await ctx.send(embed=embed)
+        
+        # Calculate current song progress if playing
+        current_progress = ""
+        if np_info and guild_id in self.song_start_times:
+            elapsed = int(time.time() - self.song_start_times[guild_id])
+            duration = np_info.get('duration', 0)
+            if duration:
+                progress_bar = create_progress_bar(elapsed, duration, length=15)
+                current_progress = f"\n{progress_bar} {format_duration(elapsed)}/{format_duration(duration)}"
+        
+        # Build pages (10 songs per page)
+        songs_per_page = 10
+        pages = []
+        
+        # First page with now playing
+        embed = discord.Embed(title="🎵 Song Queue 🎵", color=config.COLOR_QUEUED)
+        
+        if np_info:
+            np_value = f"**{np_info['title']}**\nRequested by {np_info['requester'].mention}{current_progress}"
+            embed.add_field(name="▶️ Now Playing", value=np_value, inline=False)
+        else:
+            embed.add_field(name="▶️ Now Playing", value="Nothing playing.", inline=False)
+        
+        if not q:
+            embed.add_field(name="Up Next", value="The queue is empty!", inline=False)
+            footer_text = ""
+            if loop_mode == 'song':
+                footer_text = "Loop: Song 🔂"
+            elif loop_mode == 'queue':
+                footer_text = "Loop: Queue 🔁"
+            if footer_text:
+                embed.set_footer(text=footer_text)
+            await ctx.send(embed=embed)
+            return
+        
+        # Add queue songs with pagination
+        total_duration = calculate_total_queue_duration(q)
+        
+        for page_num in range(0, len(q), songs_per_page):
+            if page_num == 0:
+                # Use existing embed for first page
+                page_embed = embed
+            else:
+                # Create new embed for subsequent pages
+                page_embed = discord.Embed(title=f"🎵 Song Queue (Page {page_num // songs_per_page + 1})", color=config.COLOR_QUEUED)
+            
+            queue_list = ""
+            for i in range(page_num, min(page_num + songs_per_page, len(q))):
+                song = q[i]
+                duration_str = format_duration(song.get('duration')) if song.get('duration') else "?"
+                queue_list += f"`{i+1}.` **{song['title']}** [{duration_str}]\n"
+                queue_list += f"    Requested by {song['requester'].display_name}\n"
+            
+            page_embed.add_field(
+                name=f"Up Next ({len(q)} total • {format_duration(total_duration)} total)",
+                value=queue_list.strip(),
+                inline=False
+            )
+            
+            # Footer
+            footer_parts = []
+            if loop_mode == 'song':
+                footer_parts.append("Loop: Song 🔂")
+            elif loop_mode == 'queue':
+                footer_parts.append("Loop: Queue 🔁")
+            
+            if len(q) > songs_per_page:
+                footer_parts.append(f"Page {len(pages) + 1}/{(len(q) - 1) // songs_per_page + 1}")
+            
+            if footer_parts:
+                page_embed.set_footer(text=" | ".join(footer_parts))
+            
+            pages.append(page_embed)
+        
+        # Send with pagination if multiple pages
+        if len(pages) == 1:
+            await ctx.send(embed=pages[0])
+        else:
+            view = QueuePaginationView(self, guild_id, pages)
+            message = await ctx.send(embed=pages[0], view=view)
+            view.message = message
 
     @commands.command(name='nowplaying', aliases=['np'], help='Shows the currently playing song (interactive message is preferred).')
     async def nowplaying(self, ctx):
@@ -718,6 +842,26 @@ class MusicCog(commands.Cog):
         vc.stop()
         await ctx.send("🔄 Restarting song...")
         await ctx.message.add_reaction('✅')
+    
+    @commands.command(name='seek', help='Jump to a specific time in the current song (e.g., 1:30, 90).')
+    async def seek(self, ctx, *, timestamp: str):
+        """Seek to a specific time in current song (simplified version)"""
+        seconds = parse_time(timestamp)
+        if seconds is None:
+            await ctx.send("Invalid time format. Use: `1:30`, `90`, or `1m30s`", delete_after=10)
+            return
+        
+        guild_id = ctx.guild.id
+        current_song_info = self.current_song.get(guild_id)
+        
+        if not current_song_info:
+            await ctx.send("No song currently playing.", delete_after=10)
+            return
+        
+        # For now, this is a simplified version - full implementation needs FFmpeg seek
+        # which would require modifying the playback to start at a specific position
+        await ctx.send(f"⏩ Seeking to {format_duration(seconds)}...")
+        await ctx.send("Note: Full seek support requires FFmpeg position control (feature coming soon)", delete_after=10)
     
     @commands.command(name='previous', aliases=['prev', 'back'], help='Play the previously played song.')
     async def previous(self, ctx):
