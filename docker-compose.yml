@@ -8,6 +8,16 @@ services:
     # Restart the bot automatically if it crashes, but not if you manually stop it.
     restart: unless-stopped
     # Load environment variables from the .env file.
+# Define the services (containers) that make up your app.
+services:
+  music-bot:
+    # Build the Docker image from the Dockerfile in the current directory ('.')
+    build: .
+    # Name the container for easier identification.
+    container_name: discord-music-bot
+    # Restart the bot automatically if it crashes, but not if you manually stop it.
+    restart: unless-stopped
+    # Load environment variables from the .env file.
     # This securely passes your BOT_TOKEN to the container without hardcoding it.
     env_file:
       - .env
@@ -16,3 +26,17 @@ services:
     # the container is removed.
     volumes:
       - ./logs:/app/logs
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+
+  redis:
+    image: redis:alpine
+    container_name: music-bot-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

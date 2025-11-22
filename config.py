@@ -73,35 +73,34 @@ YDL_BASE_OPTIONS = {
 }
 
 # ====== FFmpeg Configuration ======
-def get_ffmpeg_options(volume: int = DEFAULT_VOLUME, speed: float = 1.0, bass_boost: str = 'off'):
+def get_ffmpeg_options(volume: float = 1.0, filter_name: str = 'off'):
     """
     Generate FFmpeg options with dynamic audio filters
     
     Args:
-        volume: Volume level (0-100)
-        speed: Playback speed (0.5-2.0)
-        bass_boost: Bass boost level ('off', 'low', 'medium', 'high')
+        volume: Volume level (0.0-1.0)
+        filter_name: Name of the filter ('off', 'nightcore', 'vaporwave', 'bassboost', '8d')
     
     Returns:
         dict: FFmpeg options
     """
-    # Convert volume from 0-100 to 0-2 scale for FFmpeg
-    volume_filter = f"volume={volume/100}"
+    # Base volume filter
+    filters = [f"volume={volume}"]
     
-    # Speed adjustment
-    speed_filter = f"atempo={speed}" if speed != 1.0 else None
-    
-    # Bass boost filters
-    bass_filters = {
-        'off': None,
-        'low': 'bass=g=5',
-        'medium': 'bass=g=10',
-        'high': 'bass=g=15'
+    # Pre-defined filters
+    # Note: asetrate changes both speed and pitch. aresample restores sample rate for Discord.
+    filter_map = {
+        'off': [],
+        'nightcore': ['asetrate=48000*1.25', 'aresample=48000'],
+        'vaporwave': ['asetrate=48000*0.8', 'aresample=48000'],
+        'bassboost': ['bass=g=20'],
+        '8d': ['apulsator=hz=0.125'],
+        'karaoke': ['stereotools=mlev=0.03']
     }
-    bass_filter = bass_filters.get(bass_boost, None)
     
-    # Combine filters
-    filters = [f for f in [volume_filter, speed_filter, bass_filter] if f]
+    if filter_name in filter_map:
+        filters.extend(filter_map[filter_name])
+    
     filter_string = ','.join(filters)
     
     return {

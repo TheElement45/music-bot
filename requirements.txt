@@ -4,6 +4,12 @@ discord.py[voice]>=2.0.0
 # For loading environment variables from .env file
 python-dotenv
 
+# Core discord.py library with voice support (includes PyNaCl)
+discord.py[voice]>=2.0.0
+
+# For loading environment variables from .env file
+python-dotenv
+
 # For downloading/extracting audio stream info from YouTube etc.
 yt-dlp
 
@@ -12,3 +18,6 @@ aiohttp>=3.8.0
 
 # For better caching (optional, can use built-in dict instead)
 cachetools>=5.0.0
+
+# Redis client
+redis>=4.0.0
