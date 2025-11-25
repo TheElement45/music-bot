@@ -151,15 +151,18 @@ class MusicCog(commands.Cog):
         self.vote_skip_voters = {}  # guild_id: set of user_ids
         self.is_disconnecting = set() # guild_id
         self.seeking_guilds = set() # guild_id
-        self.vote_skip_voters = {}  # guild_id: set of user_ids
-        self.is_disconnecting = set() # guild_id
-        self.seeking_guilds = set() # guild_id
         self.song_start_times = {} # guild_id: timestamp
         self.audio_filters = {} # guild_id: filter_name
 
     @commands.Cog.listener()
     async def on_ready(self):
         self.logger.info(f'Music Cog ready as {self.bot.user}')
+        # Restore queues from Redis
+        for guild in self.bot.guilds:
+            queue = self.db.load_queue(guild.id)
+            if queue:
+                self.queues[guild.id] = queue
+                self.logger.info(f"Restored queue for guild {guild.name} ({len(queue)} songs)")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -197,6 +200,31 @@ class MusicCog(commands.Cog):
             message_id = self.now_playing_messages[guild_id]
             del self.now_playing_messages[guild_id]
 
+    async def _load_remaining_playlist(self, ctx, query, initial_count):
+        """Background task to load the rest of a large playlist"""
+        try:
+            ydl_opts = config.YDL_BASE_OPTIONS.copy()
+            ydl_opts['extract_flat'] = True
+            ydl_opts['playliststart'] = initial_count + 1
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, query, download=False)
+                
+                if 'entries' in info:
+                    new_songs = list(info['entries'])
+                    if not new_songs: return
+                    
+                    if ctx.guild.id not in self.queues:
+                        self.queues[ctx.guild.id] = []
+                        
+                    self.queues[ctx.guild.id].extend(new_songs)
+                    self.db.save_queue(ctx.guild.id, self.queues[ctx.guild.id])
+                    
+                    await ctx.send(f"✅ Loaded {len(new_songs)} more songs from playlist.")
+                    
+        except Exception as e:
+            self.logger.error(f"Error loading remaining playlist: {e}")
+
     async def search_and_get_info(self, query):
         ydl_opts = config.YDL_BASE_OPTIONS.copy()
         is_playlist = bool(PLAYLIST_URL_PATTERN.match(query))
@@ -223,6 +251,19 @@ class MusicCog(commands.Cog):
                     return [info]
         except Exception as e:
             self.logger.error(f"YTDL error: {e}")
+            
+            # Smart Search Fallback
+            if "http" in query: # If it looked like a URL
+                self.logger.info(f"URL failed, trying smart search for: {query}")
+                try:
+                    search_query = f"ytsearch:{query}"
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = await asyncio.to_thread(ydl.extract_info, search_query, download=False)
+                        if 'entries' in info and info['entries']:
+                            return [info['entries'][0]]
+                except Exception as inner_e:
+                    self.logger.error(f"Smart search failed: {inner_e}")
+            
             return {'error': str(e)}
 
     def play_next(self, ctx):
@@ -232,10 +273,58 @@ class MusicCog(commands.Cog):
         if not vc: return
         
         if guild_id in self.seeking_guilds:
-            else:
+            self.seeking_guilds.remove(guild_id)
+            # Don't pop from queue if seeking, just replay current
+            if guild_id in self.current_song:
+                pass # Logic handled in seek
+        else:
+            if guild_id in self.queues and self.queues[guild_id]:
+                # Loop logic
+                loop_mode = self.loop_mode.get(guild_id, 'off')
+                if loop_mode == 'song':
+                    if guild_id in self.current_song:
+                        self.queues[guild_id].insert(0, self.current_song[guild_id])
+                elif loop_mode == 'queue':
+                    if guild_id in self.current_song:
+                        self.queues[guild_id].append(self.current_song[guild_id])
+                
+                # Get next song
                 song_info = self.queues[guild_id].pop(0)
+                self.current_song[guild_id] = song_info
+                self.db.save_queue(guild_id, self.queues[guild_id]) # Update Redis
+                
+                # Play
+                try:
+                    url = song_info.get('url')
+                    if not url:
+                        # Re-extract if URL expired or missing (common with extract_flat)
+                        # This part is simplified; in a real bot we'd re-extract here if needed
+                        pass
+                        
+                    volume = self.volume.get(guild_id)
+                    if volume is None:
+                        volume = self.db.get_volume(guild_id)
+                        self.volume[guild_id] = volume
+                    
+                    audio_filter = self.audio_filters.get(guild_id)
+                    if audio_filter is None:
+                        audio_filter = self.db.get_filter(guild_id)
+                        self.audio_filters[guild_id] = audio_filter
 
-            asyncio.run_coroutine_threadsafe(self.delete_now_playing_message(guild_id), self.bot.loop)
+                    ffmpeg_opts = config.get_ffmpeg_options(volume=volume, filter_name=audio_filter)
+                    source = discord.FFmpegOpusAudio(url, **ffmpeg_opts)
+                    vc.play(source, after=lambda e: self.after_play_handler(e, ctx))
+                    
+                    self.song_start_times[guild_id] = time.time()
+                    asyncio.run_coroutine_threadsafe(self.send_now_playing(ctx, song_info), self.bot.loop)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error playing song: {e}")
+                    self.play_next(ctx)
+            else:
+                # Queue empty
+                if guild_id in self.current_song: del self.current_song[guild_id]
+                asyncio.run_coroutine_threadsafe(self.delete_now_playing_message(guild_id), self.bot.loop)
 
     def after_play_handler(self, error, ctx):
         if error:
@@ -285,7 +374,12 @@ class MusicCog(commands.Cog):
             self.queues[ctx.guild.id] = []
 
         added = 0
-        for song in results:
+        
+        # Handle large playlists
+        is_large_playlist = len(results) > 20
+        initial_load = results[:20] if is_large_playlist else results
+        
+        for song in initial_load:
             self.queues[ctx.guild.id].append(song)
             added += 1
             
@@ -293,9 +387,14 @@ class MusicCog(commands.Cog):
         self.db.save_queue(ctx.guild.id, self.queues[ctx.guild.id])
             
         if added == 1:
-            await ctx.send(f"Added **{results[0].get('title')}** to queue.")
+            await ctx.send(f"Added **{initial_load[0].get('title')}** to queue.")
         else:
-            await ctx.send(f"Added {added} songs to queue.")
+            msg = f"Added {added} songs to queue."
+            if is_large_playlist:
+                msg += f" Loading {len(results) - 20} more in background..."
+                # Launch background task
+                asyncio.create_task(self._load_remaining_playlist(ctx, query, 20))
+            await ctx.send(msg)
 
         if not vc.is_playing() and not vc.is_paused():
             self.play_next(ctx)

@@ -80,12 +80,16 @@ def get_ffmpeg_options(volume: float = 1.0, filter_name: str = 'off'):
     Args:
         volume: Volume level (0.0-1.0)
         filter_name: Name of the filter ('off', 'nightcore', 'vaporwave', 'bassboost', '8d')
+                     Supports chaining via '+' (e.g. 'nightcore+bassboost')
     
     Returns:
         dict: FFmpeg options
     """
-    # Base volume filter
-    filters = [f"volume={volume}"]
+    # Logarithmic volume scaling (cubic) for more natural feel
+    # vol_cmd = volume^3. 0.5 input -> 0.125 output (much quieter than 0.5 linear)
+    # This gives more precision at lower volumes.
+    vol_cmd = max(volume, 0.0) ** 3
+    filters = [f"volume={vol_cmd:.4f}"]
     
     # Pre-defined filters
     # Note: asetrate changes both speed and pitch. aresample restores sample rate for Discord.
@@ -98,8 +102,12 @@ def get_ffmpeg_options(volume: float = 1.0, filter_name: str = 'off'):
         'karaoke': ['stereotools=mlev=0.03']
     }
     
-    if filter_name in filter_map:
-        filters.extend(filter_map[filter_name])
+    # Handle chained filters
+    requested_filters = filter_name.lower().split('+')
+    
+    for f_name in requested_filters:
+        if f_name in filter_map:
+            filters.extend(filter_map[f_name])
     
     filter_string = ','.join(filters)
     
