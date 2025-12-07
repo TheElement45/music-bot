@@ -2,6 +2,7 @@ import redis
 import json
 import os
 import logging
+from typing import List, Optional, Dict
 
 class RedisManager:
     def __init__(self, host='redis', port=6379, db=0):
@@ -50,12 +51,33 @@ class RedisManager:
     def set_filter(self, guild_id, filter_name):
         self.set_setting(guild_id, 'filter', filter_name)
 
+    # --- 24/7 Mode ---
+    def get_247_mode(self, guild_id) -> bool:
+        settings = self.get_settings(guild_id)
+        return settings.get('is_247_mode', False)
+
+    def set_247_mode(self, guild_id, enabled: bool):
+        self.set_setting(guild_id, 'is_247_mode', enabled)
+
+    # --- Auto-play ---
+    def get_autoplay(self, guild_id) -> bool:
+        settings = self.get_settings(guild_id)
+        return settings.get('autoplay_enabled', False)
+
+    def set_autoplay(self, guild_id, enabled: bool):
+        self.set_setting(guild_id, 'autoplay_enabled', enabled)
+
+    # --- Song Request Channel ---
+    def get_request_channel(self, guild_id) -> Optional[int]:
+        settings = self.get_settings(guild_id)
+        return settings.get('request_channel_id')
+
+    def set_request_channel(self, guild_id, channel_id: Optional[int]):
+        self.set_setting(guild_id, 'request_channel_id', channel_id)
+
     # --- Queue Persistence ---
-    # Note: Storing complex song objects might be tricky. 
-    # We'll store a list of dicts representing the songs.
     def save_queue(self, guild_id, queue):
         if not self.client: return
-        # Queue items are already dicts from yt_dlp
         self.client.set(f"queue:{guild_id}", json.dumps(queue))
 
     def load_queue(self, guild_id):
@@ -66,6 +88,40 @@ class RedisManager:
     def clear_queue(self, guild_id):
         if not self.client: return
         self.client.delete(f"queue:{guild_id}")
+
+    # --- Saved Playlists ---
+    def save_playlist(self, guild_id, name: str, songs: List[dict]):
+        """Save a playlist for a guild"""
+        if not self.client: return
+        key = f"playlists:{guild_id}"
+        playlists = self.get_all_playlists(guild_id)
+        playlists[name] = songs
+        self.client.set(key, json.dumps(playlists))
+
+    def load_playlist(self, guild_id, name: str) -> Optional[List[dict]]:
+        """Load a saved playlist"""
+        playlists = self.get_all_playlists(guild_id)
+        return playlists.get(name)
+
+    def delete_playlist(self, guild_id, name: str) -> bool:
+        """Delete a saved playlist"""
+        if not self.client: return False
+        playlists = self.get_all_playlists(guild_id)
+        if name in playlists:
+            del playlists[name]
+            self.client.set(f"playlists:{guild_id}", json.dumps(playlists))
+            return True
+        return False
+
+    def get_all_playlists(self, guild_id) -> Dict[str, List[dict]]:
+        """Get all saved playlists for a guild"""
+        if not self.client: return {}
+        data = self.client.get(f"playlists:{guild_id}")
+        return json.loads(data) if data else {}
+
+    def list_playlists(self, guild_id) -> List[str]:
+        """List all playlist names for a guild"""
+        return list(self.get_all_playlists(guild_id).keys())
 
     # --- Cache ---
     def cache_get(self, key):

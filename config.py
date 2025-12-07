@@ -62,7 +62,7 @@ YDL_BASE_OPTIONS = {
     'restrictfilenames': True,
     'noplaylist': False,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
+    'ignoreerrors': True,  # Skip hidden/private videos
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
@@ -120,6 +120,7 @@ def get_ffmpeg_options(volume: float = 1.0, filter_name: str = 'off'):
 FFMPEG_OPTIONS = get_ffmpeg_options()
 
 # ====== Embed Colors ======
+COLOR_SUCCESS = 0x2ECC71  # Bright Green
 COLOR_PLAYING = 0x00FF00  # Green
 COLOR_QUEUED = 0x0099FF   # Blue
 COLOR_ERROR = 0xFF0000    # Red

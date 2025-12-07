@@ -45,7 +45,7 @@ class MusicBot(commands.Bot):
     async def setup_hook(self):
         """Loads extensions (cogs) before the bot connects."""
         initial_extensions = [
-            'cogs.music_cog'
+            'cogs.music'  # New refactored music module
         ]
         for extension in initial_extensions:
             try:
