@@ -11,10 +11,11 @@ services:
     # This securely passes your BOT_TOKEN to the container without hardcoding it.
     env_file:
       - .env
-    # Optional: Mount a volume for logs. 
+    # Optional: Mount a volume for logs and cookies.
     # Using a named volume 'logs_data' to avoid permission issues with host bind mounts.
     volumes:
       - logs_data:/app/logs
+      - ./cookies.txt:/app/cookies.txt:ro
     depends_on:
       - redis
     environment:

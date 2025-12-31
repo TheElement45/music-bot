@@ -122,6 +122,23 @@ A Python-based Discord bot using `discord.py` to play music from YouTube (and ot
     python main.py
     ```
 
+## Troubleshooting: YouTube "Sign in to confirm you're not a bot"
+
+If you encounter the error `ERROR: [youtube] NwFVSclD_uc: Sign in to confirm you’re not a bot`, it means YouTube is rate-limiting or blocking the bot's IP. To fix this, you need to provide cookies from a logged-in YouTube account.
+
+### 1. Export Cookies
+1.  Install a browser extension like [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/ccmclabmhdceabpgejclgjbmifhbppcb) (Chrome) or [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) (Firefox).
+2.  Go to YouTube and log in.
+3.  Use the extension to export cookies for `youtube.com` as a `cookies.txt` file.
+4.  Place the `cookies.txt` file in the bot's root directory.
+
+### 2. Configure the Bot
+*   **Local Setup:** The bot will automatically detect `cookies.txt` in the root directory.
+*   **Docker Setup:** 
+    1.  Ensure `cookies.txt` is in the root directory.
+    2.  The `docker-compose.yml` is already configured to mount this file.
+    3.  Restart the container: `docker-compose up -d --force-recreate`.
+
 ## Configuration
 
 Configuration is managed through the `.env` file. Copy `.env.example` to `.env` and customize:

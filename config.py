@@ -57,7 +57,9 @@ ALONE_BYPASS_DJ = os.getenv("ALONE_BYPASS_DJ", "True").lower() == "true"
 
 # ====== yt-dlp Configuration ======
 # Check for cookies file
-COOKIES_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+COOKIES_FILE = os.getenv("COOKIES_FILE", "cookies.txt")
+if not os.path.exists(COOKIES_FILE):
+    COOKIES_FILE = None
 
 YDL_BASE_OPTIONS = {
     'format': 'bestaudio/best',
