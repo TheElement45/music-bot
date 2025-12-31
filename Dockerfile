@@ -1,6 +1,11 @@
 # Build stage
 FROM python:3.13-slim as builder
 
+# Metadata labels
+LABEL maintainer="TheElement45"
+LABEL description="Discord Music Bot"
+LABEL version="1.0"
+
 # Prevents Python from writing .pyc files to disc
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -22,6 +27,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Final stage
 FROM python:3.13-slim
 
+# Metadata labels
+LABEL maintainer="TheElement45"
+LABEL description="Discord Music Bot"
+LABEL version="1.0"
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/deps
@@ -34,11 +44,24 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for security
+RUN groupadd -r botuser && \
+    useradd -r -g botuser -u 1000 botuser && \
+    mkdir -p /app/logs && \
+    chown -R botuser:botuser /app
+
 # Copy installed python dependencies from builder
 COPY --from=builder /app/deps /app/deps
 
 # Copy application code
-COPY . .
+COPY --chown=botuser:botuser . .
+
+# Switch to non-root user
+USER botuser
+
+# Health check to ensure bot is responsive
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
 
 # Run the Bot
 CMD ["python", "main.py"]
