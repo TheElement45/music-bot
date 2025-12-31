@@ -56,6 +56,9 @@ DJ_ROLE_NAME = os.getenv("DJ_ROLE_NAME", "")
 ALONE_BYPASS_DJ = os.getenv("ALONE_BYPASS_DJ", "True").lower() == "true"
 
 # ====== yt-dlp Configuration ======
+# Check for cookies file
+COOKIES_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+
 YDL_BASE_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -70,6 +73,20 @@ YDL_BASE_OPTIONS = {
     'source_address': '0.0.0.0',
     'skip_download': True,
     'socket_timeout': 30,
+    'cookiefile': COOKIES_FILE,
+    # Bypass bot detection
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['ios', 'web'],
+            'skip': ['dash', 'hls']
+        }
+    },
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Mode': 'navigate',
+    }
 }
 
 # ====== FFmpeg Configuration ======

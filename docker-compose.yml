@@ -11,11 +11,10 @@ services:
     # This securely passes your BOT_TOKEN to the container without hardcoding it.
     env_file:
       - .env
-    # Optional: Mount a volume for logs. This saves the discord.log file
-    # to a 'logs' directory on your host machine, so it persists even if
-    # the container is removed.
+    # Optional: Mount a volume for logs. 
+    # Using a named volume 'logs_data' to avoid permission issues with host bind mounts.
     volumes:
-      - ./logs:/app/logs
+      - logs_data:/app/logs
     depends_on:
       - redis
     environment:
@@ -30,3 +29,4 @@ services:
 
 volumes:
   redis_data:
+  logs_data:
