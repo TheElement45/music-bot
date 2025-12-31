@@ -1,45 +1,40 @@
 # **🚀 Architecture & Feature Improvements**
 
-This document outlines recommended changes to improve the bot's stability, performance, and "production-readiness."
+This document outlines the roadmap for the bot's evolution, focusing on stability, user experience, and modern Discord features.
 
-## **1\. Persistence & Reliability**
+## **1. Core System Improvements**
 
-### **💾 Database Integration (High Priority)**
+### **� Slash Command Migration (High Priority)**
 
-Current State: All data (queues, history, volume\_settings) is stored in Python dictionaries in memory.  
-Problem: If the bot restarts, crashes, or the Docker container is updated, all active queues and user settings are instantly lost.  
-Recommendation:
+- **Current State:** The bot uses legacy prefix commands (`-play`).
+- **Problem:** Discord is moving towards slash commands as the primary interaction method. Some features (like auto-complete) are only available via slash commands.
+- **Recommendation:** Migrate all commands to `app_commands`. This will improve discoverability and allow for features like song name autocomplete in the `/play` command.
 
-* **Short Term:** Use sqlite3 to persist volume settings and guild configurations.  
-* **Long Term:** Implement **Redis**.  
-  * Store active queues as Redis lists.  
-  * Store cache entries in Redis (replacing the in-memory SimpleCache).  
-  * This allows the bot to be restarted without disrupting the user experience.
+### **👤 Advanced Member Resolution**
 
-### **📡 Handling Large Playlists**
+- **Current State:** Requester information is persisted as an ID in Redis.
+- **Problem:** If the Member object isn't in the cache when the bot restarts, it shows `<@ID>` instead of a mention/name.
+- **Recommendation:** Implement a background resolver that attempts to fetch Member objects for persisted IDs to restore full profile information in embeds.
 
-Current State:  
-The bot iterates through every entry in a playlist immediately upon fetching.  
-Problem:  
-Loading a playlist with 500+ songs will block the execution flow, potentially causing the bot to hang or lag significantly while processing yt-dlp results.  
-Recommendation:
+### **📡 Handling Large Playlists (Phase 2)**
 
-* **Pagination/Chunking:** Only load the first 10-20 songs immediately to start playback.  
-* **Background Task:** Offload the processing of the remaining playlist items to a background asyncio task so the bot remains responsive.
+- **Current State:** Basic background loading implemented.
+- **Improvement:** Add a "Playlist Loading" progress message that updates as more songs are loaded, and allow privileged users to "Cancel" the background task.
 
-## **2\. Code Structure & Polish**
+## **2. User Experience & Polish**
 
-### **🛠️ Enhanced Audio Control**
+### **� Interactive Search UI**
 
-* **Filter Chaining:** The current get\_ffmpeg\_options is good, but could be expanded to allow "Nightcore" (Speed \+ Pitch) or "Vaporwave" effects easily.  
-* **Volume Smoothness:** FFmpeg volume scaling is linear. Using logarithmic scaling often feels more natural to human ears.
+- **Current State:** `-play <query>` automatically picks the first result.
+- **Improvement:** When searching (not using a direct URL), display the top 5 results with Buttons or a Select Menu for the user to pick their desired track.
 
-### **🔍 Smart Search Fallback**
+### **🎵 Audio Filter UI**
 
-* Currently, if a URL fails validation, it is treated as a generic error.  
-* **Improvement:** If a URL fails (e.g., a broken link), automatically attempt to extract the ID or title and perform a search as a fallback mechanism.
+- **Current State:** Filters applied via text command.
+- **Improvement:** Add a button to the "Now Playing" message that opens a Modal or Select Menu to toggle audio filters without typing.
 
-### **📊 Docker Optimization**
+## **3. Infrastructure**
 
-* **Multi-stage Build:** The current Dockerfile is good, but a multi-stage build could reduce the image size further by removing build dependencies after installation.  
-* **Cache Mounts:** Add RUN \--mount=type=cache,target=/root/.cache/pip to the Dockerfile to speed up subsequent builds.
+### **📊 Dashboard & Metrics**
+
+- **Improvement:** Export bot statistics (active users, popular songs, memory usage) to a Prometheus-compatible endpoint or a simple web dashboard.

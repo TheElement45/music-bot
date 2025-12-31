@@ -18,6 +18,7 @@ class Song:
     duration: int  # Duration in seconds
     thumbnail: Optional[str] = None
     requester: Optional[discord.Member] = None
+    requester_id: Optional[int] = None
     original_url: Optional[str] = None  # Backup URL for re-extraction
     
     # Additional metadata
@@ -34,6 +35,7 @@ class Song:
             duration=info.get('duration', 0) or 0,
             thumbnail=info.get('thumbnail'),
             requester=requester,
+            requester_id=requester.id if requester else None,
             original_url=info.get('original_url'),
             uploader=info.get('uploader'),
             view_count=info.get('view_count'),
@@ -50,7 +52,7 @@ class Song:
             'original_url': self.original_url,
             'uploader': self.uploader,
             'view_count': self.view_count,
-            # Note: requester is not serialized (can't store discord.Member)
+            'requester_id': self.requester_id,
         }
     
     @classmethod
@@ -65,6 +67,7 @@ class Song:
             original_url=data.get('original_url'),
             uploader=data.get('uploader'),
             view_count=data.get('view_count'),
+            requester_id=data.get('requester_id'),
         )
     
     @property

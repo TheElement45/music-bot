@@ -32,6 +32,15 @@ class EmbedBuilder:
         if song.uploader:
             embed.add_field(name="Channel", value=song.uploader, inline=True)
         
+        # Add requester info
+        requester_val = "Unknown"
+        if song.requester:
+            requester_val = song.requester.mention
+        elif song.requester_id:
+            requester_val = f"<@{song.requester_id}>"
+        
+        embed.add_field(name="Requested by", value=requester_val, inline=True)
+        
         return embed
     
     @staticmethod
@@ -66,6 +75,15 @@ class EmbedBuilder:
         
         # Queue length
         embed.add_field(name="Queue", value=f"📋 {queue_length} songs", inline=True)
+        
+        # Add requester info
+        requester_val = "Unknown"
+        if song.requester:
+            requester_val = song.requester.mention
+        elif song.requester_id:
+            requester_val = f"<@{song.requester_id}>"
+        
+        embed.add_field(name="Requested by", value=requester_val, inline=True)
         
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
@@ -125,6 +143,15 @@ class EmbedBuilder:
         )
         embed.add_field(name="Position", value=f"#{position}", inline=True)
         embed.add_field(name="Duration", value=song.formatted_duration, inline=True)
+        
+        # Add requester info
+        requester_val = "Unknown"
+        if song.requester:
+            requester_val = song.requester.mention
+        elif song.requester_id:
+            requester_val = f"<@{song.requester_id}>"
+        
+        embed.add_field(name="Requested by", value=requester_val, inline=True)
         
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
