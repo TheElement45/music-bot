@@ -48,6 +48,7 @@ RUN apt-get update && \
 RUN groupadd -r botuser && \
     useradd -r -g botuser -u 1000 botuser && \
     mkdir -p /app/logs && \
+    chmod 755 /app/logs && \
     chown -R botuser:botuser /app
 
 # Copy installed python dependencies from builder

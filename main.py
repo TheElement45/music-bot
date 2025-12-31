@@ -14,17 +14,28 @@ import config
 # --- Logging Setup ---
 discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
-os.makedirs('logs', exist_ok=True)
 
-# Add rotating file handler
-handler = logging.handlers.TimedRotatingFileHandler(
-    filename=config.LOG_FILE,
-    encoding='utf-8',
-    when=config.LOG_ROTATION,
-    backupCount=config.LOG_BACKUP_COUNT
-)
-handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
-discord_logger.addHandler(handler)
+# Ensure logs directory exists with proper permissions
+log_dir = os.path.dirname(config.LOG_FILE)
+if log_dir:
+    os.makedirs(log_dir, exist_ok=True)
+
+# Add rotating file handler with error handling
+try:
+    handler = logging.handlers.TimedRotatingFileHandler(
+        filename=config.LOG_FILE,
+        encoding='utf-8',
+        when=config.LOG_ROTATION,
+        backupCount=config.LOG_BACKUP_COUNT
+    )
+except (PermissionError, OSError) as e:
+    # Fallback to console-only logging if file logging fails
+    print(f"Warning: Could not create log file handler: {e}")
+    print("Falling back to console logging only")
+    handler = None
+if handler:
+    handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+    discord_logger.addHandler(handler)
 
 # Also add console handler for development
 console_handler = logging.StreamHandler()
